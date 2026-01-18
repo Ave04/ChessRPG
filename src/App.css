@@ -123,3 +123,15 @@
   color: rgba(232, 234, 240, 0.75);
   line-height: 1.4;
 }
+
+@media (max-width: 920px) {
+  .shell {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+
+  .board {
+    width: min(92vw, 520px);
+    height: min(92vw, 520px);
+  }
+}
