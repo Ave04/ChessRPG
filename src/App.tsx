@@ -1,35 +1,86 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { useMemo, useState } from "react";
+import type { Square } from "chess.js";
+import "./App.css";
 
-function App() {
-  const [count, setCount] = useState(0)
+import {
+  createGame,
+  getFen,
+  getLegalMovesFrom,
+  getTurn,
+  isInCheck,
+  isGameOver,
+  tryMove,
+} from "./features/chess/logic/chessEngine";
+
+import { Board } from "./features/chess/components/Board";
+import { HUD } from "./components/layout/HUD";
+
+export default function App() {
+  const chess = useMemo(() => createGame(), []);
+  const [fen, setFen] = useState(getFen(chess));
+
+  const [selected, setSelected] = useState<Square | null>(null);
+  const [legalTargets, setLegalTargets] = useState<Set<Square>>(new Set());
+  const [captureTargets, setCaptureTargets] = useState<Set<Square>>(new Set());
+  const [lastMove, setLastMove] = useState<string | null>(null);
+
+  const turn = getTurn(chess);
+  const inCheck = isInCheck(chess);
+  const gameOver = isGameOver(chess);
+
+  function clearSelection() {
+    setSelected(null);
+    setLegalTargets(new Set());
+    setCaptureTargets(new Set());
+  }
+
+  function onSquareClick(sq: Square) {
+    if (gameOver.over) return;
+
+    // If we have a selected piece and clicked a legal target -> move
+    if (selected && legalTargets.has(sq)) {
+      const result = tryMove(chess, selected, sq);
+      if (result.ok) {
+        setFen(getFen(chess));
+        setLastMove(result.san ?? null);
+      }
+      clearSelection();
+      return;
+    }
+
+    // Otherwise, select a new square (show moves if any)
+    const moves = getLegalMovesFrom(chess, sq);
+    if (moves.length === 0) {
+      clearSelection();
+      return;
+    }
+
+    setSelected(sq);
+
+    const targets = new Set<Square>();
+    const captures = new Set<Square>();
+
+    moves.forEach((m) => {
+      targets.add(m.to);
+      if (m.isCapture) captures.add(m.to);
+    });
+
+    setLegalTargets(targets);
+    setCaptureTargets(captures);
+  }
 
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+    <div className="app">
+      <div className="shell">
+        <Board
+          fen={fen}
+          selected={selected}
+          legalTargets={legalTargets}
+          captureTargets={captureTargets}
+          onSquareClick={onSquareClick}
+        />
+        <HUD turn={turn} inCheck={inCheck} gameOver={gameOver} lastMove={lastMove} />
       </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+    </div>
+  );
 }
-
-export default App
