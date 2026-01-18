@@ -1,4 +1,3 @@
-
 import type { Square } from "chess.js";
 import { fenToBoardMap, isDarkSquare } from "../logic/boardMap";
 import { pieceToGlyph } from "./pieces";

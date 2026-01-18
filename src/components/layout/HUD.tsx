@@ -1,5 +1,3 @@
-
-
 type Props = {
   turn: "w" | "b";
   inCheck: boolean;
