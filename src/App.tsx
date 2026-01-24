@@ -218,18 +218,6 @@ export default function App() {
     // --- If rooted, you can't move that piece (NORMAL mode)
     if (mode === "NORMAL" && selected && selected === sq && isRooted(sq)) {
       // selecting rooted piece is allowed, but it will show moves; we will block execution on move attempt too
-      const isCaptureAttempt = captureTargets.has(sq);
-      if (isCaptureAttempt && isCaptureBlockedByShield(game, sq)) {
-        setGame((prev) => {
-          const next = removeShield(prev, sq);
-          return {
-            ...next,
-            log: [`Shield blocked capture on ${sq}`, ...next.log].slice(0, 10),
-          };
-        });
-        clearSelection();
-        return; // turn is spent? (MVP decision)
-      }
     }
 
     // === CHARGE: pick adjacent enemy to root after landing
@@ -239,7 +227,7 @@ export default function App() {
       // must click an enemy adjacent target
       if (chargeEnemyTargets.has(sq)) {
         setGame((prev) => {
-          const rootedUntil = prev.turnNumber + 1; // expires after opponent completes a turn (simple MVP)
+          const rootedUntil = prev.turnNumber + 2; // expires after opponent completes a turn (simple MVP)
           const next = addStatus(prev, sq, {
             type: "ROOTED",
             expiresOnTurn: rootedUntil,
@@ -323,6 +311,20 @@ export default function App() {
     if (selected && legalTargets.has(sq)) {
       // block move if rooted
       if (isRooted(selected)) {
+        clearSelection();
+        return;
+      }
+
+      // if this is a capture attempt and target is shielded, block capture + remove shield
+      const isCaptureAttempt = captureTargets.has(sq);
+      if (isCaptureAttempt && isCaptureBlockedByShield(game, sq)) {
+        setGame((prev) => {
+          const next = removeShield(prev, sq);
+          return {
+            ...next,
+            log: [`Shield blocked capture on ${sq}`, ...next.log].slice(0, 10),
+          };
+        });
         clearSelection();
         return;
       }
