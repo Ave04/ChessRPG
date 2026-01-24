@@ -135,3 +135,42 @@
     height: min(92vw, 520px);
   }
 }
+
+.abilityBtn {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.12);
+  color: #e8eaf0;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.abilityBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.statusBadge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.25);
+  user-select: none;
+}
+
+.statusBadge.rooted {
+  background: rgba(255, 80, 80, 0.22);
+  border-color: rgba(255, 80, 80, 0.35);
+}
+
+.statusBadge.shielded {
+  background: rgba(90, 170, 255, 0.18);
+  border-color: rgba(90, 170, 255, 0.3);
+}

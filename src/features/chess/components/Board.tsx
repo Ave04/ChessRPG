@@ -8,6 +8,8 @@ type Props = {
   legalTargets: Set<Square>;
   captureTargets: Set<Square>;
   onSquareClick: (sq: Square) => void;
+  rootedSquares: Set<Square>;
+  shieldedSquares: Set<Square>;
 };
 
 const files = ["a", "b", "c", "d", "e", "f", "g", "h"] as const;
@@ -18,6 +20,8 @@ export function Board({
   legalTargets,
   captureTargets,
   onSquareClick,
+  rootedSquares,
+  shieldedSquares,
 }: Props) {
   const map = fenToBoardMap(fen);
 
@@ -54,9 +58,19 @@ export function Board({
               {isTarget && !isCapture && <span className="dot" />}
               {/* ring overlay for capture */}
               {isCapture && <span className="ring" />}
+              {rootedSquares.has(sq) && (
+                <span className="statusBadge rooted" title="Rooted">
+                  ⛓
+                </span>
+              )}
+              {shieldedSquares.has(sq) && (
+                <span className="statusBadge shielded" title="Shielded">
+                  🛡
+                </span>
+              )}
             </button>
           );
-        })
+        }),
       )}
     </div>
   );
