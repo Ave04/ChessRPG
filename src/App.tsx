@@ -212,6 +212,25 @@ export default function App() {
     });
   }
 
+  function endTurnNoMove(label: string) {
+    setLastMove(label);
+
+    setGame((prev) => {
+      let next = { ...prev, turnNumber: prev.turnNumber + 1 };
+      next = removeExpiredStatuses(next);
+
+      // since no chess move happened, chess.turn() won't change automatically
+      // so we manually regen for the OTHER side
+      const nextTurn = (turn === "w" ? "b" : "w") as "w" | "b";
+      next = regenManaForSide(next, nextTurn);
+
+      return {
+        ...next,
+        log: [label, ...next.log].slice(0, 10),
+      };
+    });
+  }
+
   function onSquareClick(sq: Square) {
     if (gameOver.over) return;
 
@@ -318,13 +337,12 @@ export default function App() {
       // if this is a capture attempt and target is shielded, block capture + remove shield
       const isCaptureAttempt = captureTargets.has(sq);
       if (isCaptureAttempt && isCaptureBlockedByShield(game, sq)) {
-        setGame((prev) => {
-          const next = removeShield(prev, sq);
-          return {
-            ...next,
-            log: [`Shield blocked capture on ${sq}`, ...next.log].slice(0, 10),
-          };
-        });
+        // consume shield
+        setGame((prev) => removeShield(prev, sq));
+
+        // spend the turn (no chess move happens)
+        endTurnNoMove(`Shield blocked capture on ${sq}`);
+
         clearSelection();
         return;
       }
