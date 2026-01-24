@@ -15,5 +15,5 @@ export function removeShield(state: GameState, square: Square): GameState {
     if (filtered.length) nextStatuses[key] = filtered;
     else delete nextStatuses[key];
 
-    return { ...state, statues: nextStatuses};
+    return { ...state, statuses: nextStatuses};
 }
