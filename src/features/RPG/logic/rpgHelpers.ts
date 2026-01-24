@@ -2,6 +2,7 @@ import type { Square } from "chess.js";
 import type { GameState, Side, Status } from "../../chess/logic/types";
 
 export const ABILITY_CHARGE = "KNIGHT_CHARGE";
+export const ABILITY_BULWARK = "ROOK_BULWARK";
 
 export function opposite(side: Side): Side {
     return side === "w" ? "b" : "w";

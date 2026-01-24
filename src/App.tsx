@@ -1,6 +1,11 @@
 import { useMemo, useState } from "react";
 import type { Square } from "chess.js";
 import "./App.css";
+import { ABILITY_BULWARK } from "./features/RPG/logic/rpgHelpers";
+import {
+  isCaptureBlockedByShield,
+  removeShield,
+} from "./features/RPG/logic/captureRules";
 
 import {
   createGame,
@@ -68,6 +73,43 @@ export default function App() {
     return out;
   }
 
+  function isRook(square: Square): boolean {
+    const p = chess.get(square);
+    return Boolean(p && p.color === turn && p.type === "r");
+  }
+
+  function onCastBulwark() {
+    if (!selected || !isRook(selected)) return;
+
+    const pieceKey = `rook@${selected}`;
+    const availableOn = getCooldownAvailableTurn(
+      game,
+      pieceKey,
+      ABILITY_BULWARK,
+    );
+
+    if (game.turnNumber < availableOn) return;
+    if (!canAfford(game, turn, 1)) return;
+    if (isRooted(selected)) return; // optional: rooted rook can’t cast
+
+    setGame((prev) => {
+      let next = spendMana(prev, turn, 1);
+      next = setCooldown(next, pieceKey, ABILITY_BULWARK, next.turnNumber + 3);
+
+      // Shield lasts until next turn number (simple MVP)
+      const shieldUntil = next.turnNumber + 1;
+      next = addStatus(next, selected, {
+        type: "SHIELDED",
+        expiresOnTurn: shieldUntil,
+      });
+
+      return {
+        ...next,
+        log: ["Bulwark (Shielded rook)", ...next.log].slice(0, 10),
+      };
+    });
+  }
+
   function clearSelection() {
     setSelected(null);
     setLegalTargets(new Set());
@@ -82,13 +124,13 @@ export default function App() {
     setChargeEnemyTargets(new Set());
   }
 
-  function pieceAt(square: Square): string | null {
-    const p = chess.get(square);
-    if (!p) return null;
-    // p.type is lowercase: p,n,b,r,q,k
-    // p.color is 'w' or 'b'
-    return `${p.color}${p.type.toUpperCase()}`; // wN, bP, etc
-  }
+  // function pieceAt(square: Square): string | null {
+  //   const p = chess.get(square);
+  //   if (!p) return null;
+  //   // p.type is lowercase: p,n,b,r,q,k
+  //   // p.color is 'w' or 'b'
+  //   return `${p.color}${p.type.toUpperCase()}`; // wN, bP, etc
+  // }
 
   function isOwnPiece(square: Square): boolean {
     const p = chess.get(square);
@@ -176,6 +218,18 @@ export default function App() {
     // --- If rooted, you can't move that piece (NORMAL mode)
     if (mode === "NORMAL" && selected && selected === sq && isRooted(sq)) {
       // selecting rooted piece is allowed, but it will show moves; we will block execution on move attempt too
+      const isCaptureAttempt = captureTargets.has(sq);
+      if (isCaptureAttempt && isCaptureBlockedByShield(game, sq)) {
+        setGame((prev) => {
+          const next = removeShield(prev, sq);
+          return {
+            ...next,
+            log: [`Shield blocked capture on ${sq}`, ...next.log].slice(0, 10),
+          };
+        });
+        clearSelection();
+        return; // turn is spent? (MVP decision)
+      }
     }
 
     // === CHARGE: pick adjacent enemy to root after landing
@@ -343,7 +397,57 @@ export default function App() {
             onClick: onCastCharge,
           };
         })()
-      : null;
+      : selected && isRook(selected)
+        ? (() => {
+            const pieceKey = `rook@${selected}`;
+            const availableOn = getCooldownAvailableTurn(
+              game,
+              pieceKey,
+              ABILITY_BULWARK,
+            );
+
+            if (isRooted(selected)) {
+              return {
+                title: "Bulwark",
+                description:
+                  "Cost 1. Shield this rook until your next turn. CD 3.",
+                enabled: false,
+                reasonDisabled: "This rook is Rooted.",
+                onClick: onCastBulwark,
+              };
+            }
+
+            if (!canAfford(game, turn, 1)) {
+              return {
+                title: "Bulwark",
+                description:
+                  "Cost 1. Shield this rook until your next turn. CD 3.",
+                enabled: false,
+                reasonDisabled: "Not enough mana.",
+                onClick: onCastBulwark,
+              };
+            }
+
+            if (game.turnNumber < availableOn) {
+              return {
+                title: "Bulwark",
+                description:
+                  "Cost 1. Shield this rook until your next turn. CD 3.",
+                enabled: false,
+                reasonDisabled: `On cooldown (ready on turn ${availableOn}).`,
+                onClick: onCastBulwark,
+              };
+            }
+
+            return {
+              title: "Bulwark",
+              description:
+                "Cost 1. Shield this rook until your next turn. CD 3.",
+              enabled: true,
+              onClick: onCastBulwark,
+            };
+          })()
+        : null;
 
   const modeLabel =
     mode === "CHARGE_MOVE"
