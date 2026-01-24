@@ -15,6 +15,9 @@ import {
 import { Board } from "./features/chess/components/Board";
 import { HUD } from "./components/layout/HUD";
 
+import { createInitialGameState } from "./features/chess/logic/gameInit";
+import { regenManaForSide } from "./features/chess/logic/turnTick";
+
 export default function App() {
   const chess = useMemo(() => createGame(), []);
   const [fen, setFen] = useState(getFen(chess));
@@ -23,6 +26,8 @@ export default function App() {
   const [legalTargets, setLegalTargets] = useState<Set<Square>>(new Set());
   const [captureTargets, setCaptureTargets] = useState<Set<Square>>(new Set());
   const [lastMove, setLastMove] = useState<string | null>(null);
+
+  const [game, setGame] = useState(createInitialGameState());
 
   const turn = getTurn(chess);
   const inCheck = isInCheck(chess);
@@ -43,6 +48,17 @@ export default function App() {
       if (result.ok) {
         setFen(getFen(chess));
         setLastMove(result.san ?? null);
+
+        const nextTurn = getTurn(chess);
+
+        setGame((prev) => {
+          const bumped = { ...prev, turnNumber: prev.turnNumber + 1 };
+          const regen = regenManaForSide(bumped, nextTurn);
+          return {
+            ...regen,
+            log: [`${result.san ?? "Move"}`, ...regen.log].slice(0,10),
+          };
+        });
       }
       clearSelection();
       return;
@@ -79,7 +95,8 @@ export default function App() {
           captureTargets={captureTargets}
           onSquareClick={onSquareClick}
         />
-        <HUD turn={turn} inCheck={inCheck} gameOver={gameOver} lastMove={lastMove} />
+        <HUD turn={turn} inCheck={inCheck} gameOver={gameOver} lastMove={lastMove} mana={game.mana} maxMana = {game.maxMana} 
+        />
       </div>
     </div>
   );
