@@ -1,11 +1,6 @@
 import { useMemo, useState } from "react";
 import type { Square } from "chess.js";
 import "./App.css";
-import { ABILITY_BULWARK } from "./features/RPG/logic/rpgHelpers";
-import {
-  isCaptureBlockedByShield,
-  removeShield,
-} from "./features/RPG/logic/captureRules";
 
 import {
   createGame,
@@ -25,16 +20,21 @@ import { regenManaForSide } from "./features/chess/logic/turnTick";
 
 import {
   ABILITY_CHARGE,
+  ABILITY_BULWARK,
   adjacentSquares,
   canAfford,
   getCooldownAvailableTurn,
-  hasStatus,
-  moveStatuses,
+  hasStatusById,
   removeExpiredStatuses,
   setCooldown,
   spendMana,
-  addStatus,
+  addStatusById,
 } from "./features/RPG/logic/rpgHelpers";
+
+import {
+  applyMoveToRegistry,
+  type MoveInfo,
+} from "./features/chess/logic/pieceIds";
 
 type Mode = "NORMAL" | "CHARGE_MOVE" | "CHARGE_PICK_TARGET";
 
@@ -47,12 +47,13 @@ export default function App() {
   const [captureTargets, setCaptureTargets] = useState<Set<Square>>(new Set());
   const [lastMove, setLastMove] = useState<string | null>(null);
 
-  const [game, setGame] = useState(createInitialGameState());
+  // IMPORTANT: initial game state needs the chess instance to seed piece IDs
+  const [game, setGame] = useState(() => createInitialGameState(chess));
 
   // Charge casting state
   const [mode, setMode] = useState<Mode>("NORMAL");
   const [chargeFrom, setChargeFrom] = useState<Square | null>(null);
-  const [chargePieceKey, setChargePieceKey] = useState<string | null>(null);
+  const [chargePieceId, setChargePieceId] = useState<string | null>(null);
   const [chargeLanding, setChargeLanding] = useState<Square | null>(null);
   const [chargeEnemyTargets, setChargeEnemyTargets] = useState<Set<Square>>(
     new Set(),
@@ -62,54 +63,50 @@ export default function App() {
   const inCheck = isInCheck(chess);
   const gameOver = isGameOver(chess);
 
-  const rootedSquares = getStatusSquares("ROOTED");
-  const shieldedSquares = getStatusSquares("SHIELDED");
+  // ---------- PieceId helpers (persistent identity) ----------
+  function getIdAt(square: Square): string | null {
+    return (game.registry.squareToId as any)[square] ?? null;
+  }
+
+  function isRooted(square: Square): boolean {
+    const id = getIdAt(square);
+    return id ? hasStatusById(game, id, "ROOTED") : false;
+  }
+
+  function isShieldedSquare(square: Square): boolean {
+    const id = getIdAt(square);
+    return id ? hasStatusById(game, id, "SHIELDED") : false;
+  }
+
+  function consumeShieldAt(square: Square) {
+    const id = getIdAt(square);
+    if (!id) return;
+
+    setGame((prev) => {
+      const list = prev.statusesById[id] ?? [];
+      const filtered = list.filter((s) => s.type !== "SHIELDED");
+
+      const nextStatuses = { ...prev.statusesById };
+      if (filtered.length) nextStatuses[id] = filtered;
+      else delete nextStatuses[id];
+
+      return { ...prev, statusesById: nextStatuses };
+    });
+  }
 
   function getStatusSquares(type: "ROOTED" | "SHIELDED"): Set<Square> {
     const out = new Set<Square>();
-    for (const [sq, list] of Object.entries(game.statuses)) {
+    for (const [sq, id] of Object.entries(game.registry.squareToId)) {
+      const list = game.statusesById[id] ?? [];
       if (list.some((s) => s.type === type)) out.add(sq as Square);
     }
     return out;
   }
 
-  function isRook(square: Square): boolean {
-    const p = chess.get(square);
-    return Boolean(p && p.color === turn && p.type === "r");
-  }
+  const rootedSquares = getStatusSquares("ROOTED");
+  const shieldedSquares = getStatusSquares("SHIELDED");
 
-  function onCastBulwark() {
-    if (!selected || !isRook(selected)) return;
-
-    const pieceKey = `rook@${selected}`;
-    const availableOn = getCooldownAvailableTurn(
-      game,
-      pieceKey,
-      ABILITY_BULWARK,
-    );
-
-    if (game.turnNumber < availableOn) return;
-    if (!canAfford(game, turn, 1)) return;
-    if (isRooted(selected)) return; // optional: rooted rook can’t cast
-
-    setGame((prev) => {
-      let next = spendMana(prev, turn, 1);
-      next = setCooldown(next, pieceKey, ABILITY_BULWARK, next.turnNumber + 3);
-
-      // Shield lasts until next turn number (simple MVP)
-      const shieldUntil = next.turnNumber + 1;
-      next = addStatus(next, selected, {
-        type: "SHIELDED",
-        expiresOnTurn: shieldUntil,
-      });
-
-      return {
-        ...next,
-        log: ["Bulwark (Shielded rook)", ...next.log].slice(0, 10),
-      };
-    });
-  }
-
+  // ---------- selection / UI helpers ----------
   function clearSelection() {
     setSelected(null);
     setLegalTargets(new Set());
@@ -119,18 +116,10 @@ export default function App() {
   function clearCharge() {
     setMode("NORMAL");
     setChargeFrom(null);
-    setChargePieceKey(null);
+    setChargePieceId(null);
     setChargeLanding(null);
     setChargeEnemyTargets(new Set());
   }
-
-  // function pieceAt(square: Square): string | null {
-  //   const p = chess.get(square);
-  //   if (!p) return null;
-  //   // p.type is lowercase: p,n,b,r,q,k
-  //   // p.color is 'w' or 'b'
-  //   return `${p.color}${p.type.toUpperCase()}`; // wN, bP, etc
-  // }
 
   function isOwnPiece(square: Square): boolean {
     const p = chess.get(square);
@@ -142,11 +131,13 @@ export default function App() {
     return Boolean(p && p.color === turn && p.type === "n");
   }
 
-  function isRooted(square: Square): boolean {
-    return hasStatus(game, square, "ROOTED");
+  function isRook(square: Square): boolean {
+    const p = chess.get(square);
+    return Boolean(p && p.color === turn && p.type === "r");
   }
 
   function showMovesFor(square: Square) {
+    // UX: rooted piece can be selected, but shows no moves
     if (isRooted(square)) {
       setSelected(square);
       setLegalTargets(new Set());
@@ -168,39 +159,39 @@ export default function App() {
     setCaptureTargets(captures);
   }
 
-  function onCastCharge() {
-    if (!selected || !isKnight(selected)) return;
+  // ---------- Turn helpers ----------
+  function pruneDeadIds(next: typeof game) {
+    // if a piece got captured, its ID disappears from registry.idToPiece
+    const live = new Set(Object.keys(next.registry.idToPiece));
 
-    // pieceKey: for MVP, use the square it currently sits on at cast time
-    const pieceKey = `knight@${selected}`;
-    const availableOn = getCooldownAvailableTurn(
-      game,
-      pieceKey,
-      ABILITY_CHARGE,
-    );
+    const statusesById: typeof next.statusesById = {};
+    for (const [id, list] of Object.entries(next.statusesById)) {
+      if (live.has(id)) statusesById[id] = list;
+    }
 
-    if (game.turnNumber < availableOn) return;
-    if (!canAfford(game, turn, 1)) return;
-    if (isRooted(selected)) return;
+    const cooldowns: typeof next.cooldowns = {};
+    for (const [id, cd] of Object.entries(next.cooldowns)) {
+      if (live.has(id)) cooldowns[id] = cd;
+    }
 
-    setMode("CHARGE_MOVE");
-    setChargeFrom(selected);
-    setChargePieceKey(pieceKey);
-    // highlight normal knight moves (we will reuse legalTargets)
-    showMovesFor(selected);
+    return { ...next, statusesById, cooldowns };
   }
 
-  function endTurnPostMove(san: string, movedFrom: Square, movedTo: Square) {
+  function endTurnPostMove(san: string, move: MoveInfo) {
     setFen(getFen(chess));
     setLastMove(san);
 
-    // move statuses with the piece that moved
     setGame((prev) => {
       let next = { ...prev, turnNumber: prev.turnNumber + 1 };
+
+      // expire statuses at the start of the new turnNumber
       next = removeExpiredStatuses(next);
 
-      // move statuses from->to (if any)
-      next = moveStatuses(next, movedFrom, movedTo);
+      // update registry (moves IDs, handles capture/castle/promo/en-passant)
+      next = { ...next, registry: applyMoveToRegistry(next.registry, move) };
+
+      // clean up statuses/cooldowns for captured IDs
+      next = pruneDeadIds(next);
 
       const nextTurn = getTurn(chess);
       next = regenManaForSide(next, nextTurn);
@@ -212,16 +203,26 @@ export default function App() {
     });
   }
 
+  // This one flips side-to-move WITHOUT changing the board:
+  // we toggle the "side to move" field in FEN and reload it.
   function endTurnNoMove(label: string) {
+    // Flip chess.js turn by toggling FEN side-to-move
+    const currentFen = getFen(chess);
+    const parts = currentFen.split(" ");
+    if (parts.length >= 2) {
+      parts[1] = parts[1] === "w" ? "b" : "w";
+      const toggledFen = parts.join(" ");
+      chess.load(toggledFen);
+    }
+
+    setFen(getFen(chess));
     setLastMove(label);
+
+    const nextTurn = getTurn(chess);
 
     setGame((prev) => {
       let next = { ...prev, turnNumber: prev.turnNumber + 1 };
       next = removeExpiredStatuses(next);
-
-      // since no chess move happened, chess.turn() won't change automatically
-      // so we manually regen for the OTHER side
-      const nextTurn = (turn === "w" ? "b" : "w") as "w" | "b";
       next = regenManaForSide(next, nextTurn);
 
       return {
@@ -231,13 +232,59 @@ export default function App() {
     });
   }
 
+  // ---------- Abilities ----------
+  function onCastCharge() {
+    if (!selected || !isKnight(selected)) return;
+
+    const id = getIdAt(selected);
+    if (!id) return;
+
+    const availableOn = getCooldownAvailableTurn(game, id, ABILITY_CHARGE);
+
+    if (game.turnNumber < availableOn) return;
+    if (!canAfford(game, turn, 1)) return;
+    if (isRooted(selected)) return;
+
+    setMode("CHARGE_MOVE");
+    setChargeFrom(selected);
+    setChargePieceId(id);
+
+    showMovesFor(selected);
+  }
+
+  function onCastBulwark() {
+    if (!selected || !isRook(selected)) return;
+
+    const id = getIdAt(selected);
+    if (!id) return;
+
+    const availableOn = getCooldownAvailableTurn(game, id, ABILITY_BULWARK);
+
+    if (game.turnNumber < availableOn) return;
+    if (!canAfford(game, turn, 1)) return;
+    if (isRooted(selected)) return;
+
+    setGame((prev) => {
+      let next = spendMana(prev, turn, 1);
+      next = setCooldown(next, id, ABILITY_BULWARK, next.turnNumber + 3);
+
+      // shield lasts until your next turn (simple MVP)
+      const shieldUntil = next.turnNumber + 1;
+      next = addStatusById(next, id, {
+        type: "SHIELDED",
+        expiresOnTurn: shieldUntil,
+      });
+
+      return {
+        ...next,
+        log: ["Bulwark (Shielded rook)", ...next.log].slice(0, 10),
+      };
+    });
+  }
+
+  // ---------- Click handler ----------
   function onSquareClick(sq: Square) {
     if (gameOver.over) return;
-
-    // --- If rooted, you can't move that piece (NORMAL mode)
-    if (mode === "NORMAL" && selected && selected === sq && isRooted(sq)) {
-      // selecting rooted piece is allowed, but it will show moves; we will block execution on move attempt too
-    }
 
     // === CHARGE: pick adjacent enemy to root after landing
     if (mode === "CHARGE_PICK_TARGET") {
@@ -245,9 +292,12 @@ export default function App() {
 
       // must click an enemy adjacent target
       if (chargeEnemyTargets.has(sq)) {
+        const targetId = getIdAt(sq);
+        if (!targetId) return;
+
         setGame((prev) => {
-          const rootedUntil = prev.turnNumber + 2; // expires after opponent completes a turn (simple MVP)
-          const next = addStatus(prev, sq, {
+          const rootedUntil = prev.turnNumber + 2; // target loses next move
+          const next = addStatusById(prev, targetId, {
             type: "ROOTED",
             expiresOnTurn: rootedUntil,
           });
@@ -256,12 +306,13 @@ export default function App() {
             log: [`Rooted ${sq}`, ...next.log].slice(0, 10),
           };
         });
+
         clearSelection();
         clearCharge();
         return;
       }
 
-      // clicking elsewhere cancels target pick (but keeps move result)
+      // click elsewhere cancels target pick
       clearSelection();
       clearCharge();
       return;
@@ -269,19 +320,19 @@ export default function App() {
 
     // === CHARGE: move step
     if (mode === "CHARGE_MOVE") {
-      if (!chargeFrom || !chargePieceKey) return;
+      if (!chargeFrom || !chargePieceId) return;
 
       // must click one of the highlighted legal targets
       if (selected && legalTargets.has(sq)) {
         const result = tryMove(chess, selected, sq);
+
         if (result.ok) {
-          // spend mana + set cooldown
+          // spend mana + set cooldown on the PIECE ID (not square)
           setGame((prev) => {
             let next = spendMana(prev, turn, 1);
-            // cooldown means usable again on turnNumber + 2
             next = setCooldown(
               next,
-              chargePieceKey,
+              chargePieceId,
               ABILITY_CHARGE,
               next.turnNumber + 2,
             );
@@ -299,17 +350,18 @@ export default function App() {
             if (p && p.color !== turn) enemySquares.add(a);
           });
 
-          // finish the move turn logic (updates fen, ticks turn, regen, etc.)
-          endTurnPostMove(result.san ?? "Move", chargeFrom, sq);
+          // finish turn + registry update
+          endTurnPostMove(result.san ?? "Move", result.move as MoveInfo);
 
           // if there are adjacent enemies, allow picking one to root
           if (enemySquares.size > 0) {
             setMode("CHARGE_PICK_TARGET");
             setChargeLanding(sq);
             setChargeEnemyTargets(enemySquares);
-            // highlight those squares as "capture targets" (ring) for visibility
-            setLegalTargets(new Set()); // clear normal move dots
+
+            setLegalTargets(new Set());
             setCaptureTargets(enemySquares);
+
             setSelected(null);
             return;
           }
@@ -328,29 +380,24 @@ export default function App() {
 
     // === NORMAL: attempt a normal move
     if (selected && legalTargets.has(sq)) {
-      // block move if rooted
+      // rooted piece can't move
       if (isRooted(selected)) {
         clearSelection();
         return;
       }
 
-      // if this is a capture attempt and target is shielded, block capture + remove shield
+      // capture blocked by shield (consume shield + spend turn)
       const isCaptureAttempt = captureTargets.has(sq);
-      if (isCaptureAttempt && isCaptureBlockedByShield(game, sq)) {
-        // consume shield
-        setGame((prev) => removeShield(prev, sq));
-
-        // spend the turn (no chess move happens)
+      if (isCaptureAttempt && isShieldedSquare(sq)) {
+        consumeShieldAt(sq);
         endTurnNoMove(`Shield blocked capture on ${sq}`);
-
         clearSelection();
         return;
       }
 
-      const from = selected;
       const result = tryMove(chess, selected, sq);
       if (result.ok) {
-        endTurnPostMove(result.san ?? "Move", from, sq);
+        endTurnPostMove(result.san ?? "Move", result.move as MoveInfo);
       }
       clearSelection();
       return;
@@ -365,14 +412,16 @@ export default function App() {
     showMovesFor(sq);
   }
 
-  // Ability info shown in HUD (only for Knights for now)
+  // ---------- HUD ability ----------
   const ability =
     selected && isKnight(selected)
       ? (() => {
-          const pieceKey = `knight@${selected}`;
+          const id = getIdAt(selected);
+          if (!id) return null;
+
           const availableOn = getCooldownAvailableTurn(
             game,
-            pieceKey,
+            id,
             ABILITY_CHARGE,
           );
 
@@ -419,10 +468,12 @@ export default function App() {
         })()
       : selected && isRook(selected)
         ? (() => {
-            const pieceKey = `rook@${selected}`;
+            const id = getIdAt(selected);
+            if (!id) return null;
+
             const availableOn = getCooldownAvailableTurn(
               game,
-              pieceKey,
+              id,
               ABILITY_BULWARK,
             );
 

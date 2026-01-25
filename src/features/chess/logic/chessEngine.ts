@@ -10,6 +10,16 @@ export type LegalMove = {
   isCapture: boolean;
 };
 
+export type MoveInfo = {
+  from: Square;
+  to: Square;
+  flags: string; // chess.js flags string e.g. "n", "b", "c", "e", "k", "q", "p"
+  piece: "p" | "n" | "b" | "r" | "q" | "k"; // moved piece type (before promotion)
+  color: Side;
+  captured?: "p" | "n" | "b" | "r" | "q" | "k";
+  promotion?: "p" | "n" | "b" | "r" | "q" | "k";
+};
+
 export function createGame() {
   return new Chess();
 }
@@ -23,6 +33,8 @@ export function getFen(chess: Chess): string {
 }
 
 export function isInCheck(chess: Chess): boolean {
+  // depending on chess.js version, it can be inCheck() or isCheck()
+  // your earlier code used inCheck(), so keep it
   return chess.inCheck();
 }
 
@@ -36,8 +48,8 @@ export function isGameOver(chess: Chess): { over: boolean; reason?: string } {
 }
 
 export function getLegalMovesFrom(chess: Chess, from: Square): LegalMove[] {
-  // verbose gives us info like capture flag
   const moves = chess.moves({ square: from, verbose: true }) as Move[];
+
   return moves.map((m) => ({
     from: m.from as Square,
     to: m.to as Square,
@@ -46,8 +58,24 @@ export function getLegalMovesFrom(chess: Chess, from: Square): LegalMove[] {
   }));
 }
 
-export function tryMove(chess: Chess, from: Square, to: Square): { ok: boolean; san?: string } {
-  const result = chess.move({ from, to, promotion: "q" }); // auto-queen for now
+// ✅ now returns MoveInfo so registry can update persistent IDs
+export function tryMove(
+  chess: Chess,
+  from: Square,
+  to: Square,
+): { ok: boolean; san?: string; move?: MoveInfo } {
+  const result = chess.move({ from, to, promotion: "q" }); // auto-queen promotion for now
   if (!result) return { ok: false };
-  return { ok: true, san: result.san };
+
+  const move: MoveInfo = {
+    from: result.from as Square,
+    to: result.to as Square,
+    flags: result.flags,
+    piece: result.piece as MoveInfo["piece"],
+    color: result.color as Side,
+    captured: (result.captured as MoveInfo["captured"]) ?? undefined,
+    promotion: (result.promotion as MoveInfo["promotion"]) ?? undefined,
+  };
+
+  return { ok: true, san: result.san, move };
 }
