@@ -1,21 +1,24 @@
+import type { PieceRegistry, PieceId } from "./pieceIds";
+
 export type Side = "w" | "b";
-export type SquareId = string;
 
 export type Status =
-    | {type: "ROOTED"; expiresOnTurn: number}
-    | {type: "SHIELDED"; expiresOnTurn: number}
+  | { type: "ROOTED"; expiresOnTurn: number }
+  | { type: "SHIELDED"; expiresOnTurn: number };
 
 export type CooldownMap = Record<string, number>;
 
 export type GameState = {
-    turnNumber: number;
+  turnNumber: number;
 
-    mana: Record<Side, number>;
-    maxMana: Record<Side, number>;
+  mana: Record<Side, number>;
+  maxMana: Record<Side, number>;
 
-    statuses: Record<SquareId, Status[]>;
+  registry: PieceRegistry;
 
-    cooldowns: Record<string, CooldownMap>;
-    
-    log: string[];
-}
+  statusesById: Record<PieceId, Status[]>;
+
+  cooldowns: Record<string, CooldownMap>;
+
+  log: string[];
+};
